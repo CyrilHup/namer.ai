@@ -18,12 +18,16 @@ export interface ToolCallData {
   result?: any;
 }
 
+export type ToolDisplayMode = 'all' | 'availableOnly';
+
 export interface Message {
   id: string;
   role: Role;
   text: string;
   toolCalls?: ToolCallData[]; // If the message initiated a tool call
   toolResponses?: ToolCallData[]; // The result of the tool call (usually associated with a separate message conceptually, but we can bundle for UI)
+  toolDisplayMode?: ToolDisplayMode;
+  isPending?: boolean;
   isError?: boolean;
 }
 

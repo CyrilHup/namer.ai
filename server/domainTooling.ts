@@ -2,24 +2,94 @@ import { AVAILABLE_TLDS, Message, Role } from '../types';
 
 export type DomainToolArgs = { names: string[]; tlds?: string[] };
 
+const normalizeBaseNameFromText = (raw: string): string | null => {
+  const t = String(raw || '').trim();
+  if (!t) return null;
+  const cleaned = t
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/^-+/, '')
+    .replace(/-+$/, '')
+    .slice(0, 63);
+  return cleaned || null;
+};
+
+const extractCandidatesFromText = (
+  text: string,
+  stopWords: Set<string>
+): { names: string[]; tlds: string[] } => {
+  const t = String(text || '');
+  const names: string[] = [];
+  const tlds: string[] = [];
+  const seenNames = new Set<string>();
+  const seenTlds = new Set<string>();
+
+  // 1) Capture full domains anywhere in the text.
+  // Example: "domai.ai", "namerai.ai".
+  const domainRe = /\b([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.([a-z]{2,})\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = domainRe.exec(t))) {
+    const base = normalizeBaseNameFromText(m[1]);
+    const tld = `.${String(m[2] || '').toLowerCase()}`;
+    if (base && !stopWords.has(base) && !seenNames.has(base)) {
+      names.push(base);
+      seenNames.add(base);
+    }
+    if (tld && !seenTlds.has(tld)) {
+      tlds.push(tld);
+      seenTlds.add(tld);
+    }
+    if (names.length >= 16) break;
+  }
+
+  // 2) Capture simple list items like:
+  // "1. Domai.ai" or "- Domly" or "Namely.ai".
+  const lines = t.split(/\r?\n/);
+  for (const line of lines) {
+    const lm = line.match(/^\s*(?:[-*]|\d+\.|\d+\))\s*([^\s,;:()]{2,80})/);
+    if (!lm) continue;
+    const token = String(lm[1] || '').trim();
+    if (!token) continue;
+
+    // If it looks like a full domain, domainRe already got it.
+    const tokenBase = token.includes('.') ? token.split('.')[0] : token;
+    const base = normalizeBaseNameFromText(tokenBase);
+    if (base && !stopWords.has(base) && !seenNames.has(base)) {
+      names.push(base);
+      seenNames.add(base);
+    }
+    if (names.length >= 16) break;
+  }
+
+  return { names, tlds };
+};
+
 export const extractDomainRequest = (text: string): DomainToolArgs | null => {
   const t = String(text || '').trim();
   if (!t) return null;
 
   const stopWords = new Set(['the', 'a', 'an', 'name', 'domain', 'again', 'please']);
 
-  // 1) Full domain like namer.ia (most explicit)
-  const domainMatch = t.match(/\b([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.([a-z]{2,})\b/i);
-  if (domainMatch) {
-    const base = domainMatch[1];
-    const tld = `.${String(domainMatch[2]).toLowerCase()}`;
-    return { names: [base], tlds: [tld] };
+  // 1) Extract many candidates from the text (domains and list items)
+  const extracted = extractCandidatesFromText(t, stopWords);
+  if (extracted.names.length > 0) {
+    return extracted.tlds.length > 0
+      ? { names: extracted.names, tlds: extracted.tlds }
+      : { names: extracted.names };
   }
 
-  // 2) Quoted name like "namer" (also explicit)
-  const quoted = t.match(/"([^"\n]{2,64})"|'([^'\n]{2,64})'/);
-  const quotedName = String(quoted?.[1] || quoted?.[2] || '').trim();
-  if (quotedName) return { names: [quotedName] };
+  // 2) Quoted name(s) like "namer" (also explicit)
+  const quotedNames: string[] = [];
+  const quotedRe = /"([^"\n]{2,64})"|'([^'\n]{2,64})'/g;
+  let qm: RegExpExecArray | null;
+  while ((qm = quotedRe.exec(t))) {
+    const q = String(qm[1] || qm[2] || '').trim();
+    const base = normalizeBaseNameFromText(q);
+    if (base && !stopWords.has(base)) quotedNames.push(q);
+    if (quotedNames.length >= 8) break;
+  }
+  if (quotedNames.length > 0) return { names: quotedNames };
 
   // 3) Patterns like "check again namer" (no quotes).
   // Keep conservative to avoid capturing arbitrary words.

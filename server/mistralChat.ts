@@ -67,6 +67,9 @@ export const checkDomainsTool: MistralTool = {
 
 export const mapMessagesToMistral = (messages: Message[], systemInstruction?: string): MistralChatMessage[] => {
   const out: MistralChatMessage[] = [];
+  // Track tool call ids that have been introduced to the model so we don't
+  // accidentally send orphaned `tool` messages (Mistral rejects those).
+  const knownToolCallIds = new Set<string>();
 
   if (systemInstruction && systemInstruction.trim()) {
     out.push({ role: 'system', content: systemInstruction.trim() });
@@ -85,6 +88,10 @@ export const mapMessagesToMistral = (messages: Message[], systemInstruction?: st
     if (m?.role === Role.MODEL) {
       // MODEL -> assistant (+ optional tool calls)
       if (Array.isArray(m?.toolCalls) && m.toolCalls.length > 0) {
+        for (const tc of m.toolCalls) {
+          const id = String(tc?.id ?? '').trim();
+          if (id) knownToolCallIds.add(id);
+        }
         out.push({
           role: 'assistant',
           content: String(m?.text ?? ''),
@@ -106,9 +113,13 @@ export const mapMessagesToMistral = (messages: Message[], systemInstruction?: st
       // Tool responses (results) are separate tool-role messages
       if (Array.isArray(m?.toolResponses) && m.toolResponses.length > 0) {
         for (const tr of m.toolResponses) {
+          const toolCallId = String(tr?.id ?? '').trim();
+          // Only include tool messages if the corresponding tool_call_id was
+          // previously sent in an assistant message.
+          if (!toolCallId || !knownToolCallIds.has(toolCallId)) continue;
           out.push({
             role: 'tool',
-            tool_call_id: tr.id,
+            tool_call_id: toolCallId,
             name: tr.name,
             content: JSON.stringify(tr.result ?? null)
           });
@@ -117,6 +128,22 @@ export const mapMessagesToMistral = (messages: Message[], systemInstruction?: st
     }
   }
 
+  return out;
+};
+
+const ensureMistralValidMessageOrder = (messages: MistralChatMessage[]): MistralChatMessage[] => {
+  // Mistral chat/completions requires the last message to be role 'user' or 'tool'
+  // (unless using special assistant prefix behavior). In some client flows we may
+  // accidentally include a trailing assistant message; trim those defensively.
+  const out = [...(messages || [])];
+  while (out.length > 0) {
+    const last = out[out.length - 1];
+    if (last.role === 'assistant') {
+      out.pop();
+      continue;
+    }
+    break;
+  }
   return out;
 };
 
@@ -158,6 +185,21 @@ export const buildChatResponse = async (
   }
 
   const mappedMessages = mapMessagesToMistral(messages as Message[], systemInstruction);
+  const safeMessages = ensureMistralValidMessageOrder(mappedMessages);
+
+  if (safeMessages.length === 0) {
+    return { status: 400, json: { error: 'Invalid message sequence for Mistral (no user/tool message).' } };
+  }
+
+  const lastRole = safeMessages[safeMessages.length - 1]?.role;
+  if (lastRole !== 'user' && lastRole !== 'tool') {
+    return {
+      status: 400,
+      json: {
+        error: `Invalid message order for Mistral: last role must be user or tool, got ${String(lastRole)}.`
+      }
+    };
+  }
 
   const mistralRes = await fetch('https://api.mistral.ai/v1/chat/completions', {
     method: 'POST',
@@ -167,7 +209,7 @@ export const buildChatResponse = async (
     },
     body: JSON.stringify({
       model,
-      messages: mappedMessages,
+      messages: safeMessages,
       tools: [checkDomainsTool],
       tool_choice: 'auto',
       temperature: 0.9

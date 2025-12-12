@@ -1,7 +1,8 @@
 import React from 'react';
 import { Message, Role, DomainCheckResult } from '../types';
-import { Bot, User, Cpu } from 'lucide-react';
+import { Bot, User, Cpu, Loader2 } from 'lucide-react';
 import { DomainCard } from './DomainCard';
+import { MarkdownText } from './MarkdownText';
 
 interface ChatMessageProps {
   message: Message;
@@ -10,6 +11,9 @@ interface ChatMessageProps {
 export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   const isUser = message.role === Role.USER;
   const isSystem = message.role === Role.SYSTEM;
+  const toolDisplayMode = message.toolDisplayMode ?? 'availableOnly';
+
+  const isPendingAssistant = !isUser && Boolean(message.isPending);
 
   if (isSystem) return null;
 
@@ -33,7 +37,16 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
               ? 'bg-indigo-600 text-white rounded-tr-none' 
               : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'}
           `}>
-             <div className="whitespace-pre-wrap">{message.text}</div>
+             {isPendingAssistant ? (
+               <div className="flex items-center gap-2">
+                 <Loader2 size={16} className="animate-spin opacity-70" />
+                 <span className="opacity-80">
+                   {message.text || 'Working…'}
+                 </span>
+               </div>
+             ) : (
+               <MarkdownText text={message.text} />
+             )}
           </div>
 
           {/* Tool Results (Domain Cards) */}
@@ -49,10 +62,14 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
                      // It should be an array of DomainCheckResult
                      const results = toolResp.result as DomainCheckResult[];
                      if (!Array.isArray(results)) return null;
+
+                    const displayResults =
+                      toolDisplayMode === 'all' ? results : results.filter(r => r?.status === 'available');
+                    if (displayResults.length === 0) return null;
                      
                      return (
                         <React.Fragment key={idx}>
-                          {results.map((res) => (
+                        {displayResults.map((res) => (
                              <DomainCard key={`${res.domain}-${idx}`} result={res} />
                           ))}
                         </React.Fragment>
