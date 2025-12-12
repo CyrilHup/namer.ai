@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Menu, Sparkles, AlertCircle } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { Send, Menu, Sparkles, AlertCircle, Moon, Sun, PanelLeft } from 'lucide-react';
 import { Message, Role, DomainCheckResult } from './types';
 import { sendMessageToBackend } from './services/chatService';
 import { checkMultipleDomains } from './services/domainService';
@@ -42,15 +42,20 @@ TLD RULES:
 const extractRequestedCount = (text: string): number | null => {
   const t = String(text || '').toLowerCase();
 
-  // Look for patterns like: "give me 10", "suggest 12 names", "10 domains", "need 5 options".
+  // Look for patterns like:
+  // - "give me 10", "give me only 5", "just 5", "only 7"
+  // - "suggest 12 names", "10 domains", "need 5 options".
   const patterns: RegExp[] = [
-    /\b(?:give|suggest|generate|find|need|want|provide|show)\s+(\d{1,2})\b/i,
+    // allow small filler words between the verb and the number
+    /\b(?:give|suggest|generate|find|need|want|provide|show)\s+(?:me\s+)?(?:only\s+|just\s+)?(\d{1,2})\b/i,
+    /\b(?:only|just)\s+(\d{1,2})\b/i,
     /\b(\d{1,2})\s+(?:names|name|domains|domain|options|ideas|suggestions)\b/i
   ];
 
   // French patterns: "je veux 5 noms", "donne-moi 4", "4 noms", "j'en veux 6".
   patterns.push(
-    /\b(?:je\s*veux|j\s*en\s*veux|donne(?:-moi)?|propose(?:-moi)?|genere|g[ée]n[ée]re|trouve|il\s*me\s*faut)\s+(\d{1,2})\b/i,
+    /\b(?:je\s*veux|j\s*en\s*veux|donne(?:-moi)?|propose(?:-moi)?|genere|g[ée]n[ée]re|trouve|il\s*me\s*faut)\s+(?:seulement\s+|juste\s+|que\s+)?(\d{1,2})\b/i,
+    /\b(?:seulement|juste|que)\s+(\d{1,2})\b/i,
     /\b(\d{1,2})\s+(?:noms|nom|domaines|domaine|options|id[ée]es|suggestions)\b/i
   );
 
@@ -187,12 +192,28 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedTlds, setSelectedTlds] = useState<string[]>(['.com', '.io', '.ai']);
   const [isBackendConfigured, setIsBackendConfigured] = useState<boolean | null>(null);
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    try {
+      const stored = localStorage.getItem('theme');
+      if (stored === 'dark' || stored === 'light') return stored;
+      return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ? 'dark' : 'light';
+    } catch {
+      return 'light';
+    }
+  });
   
   // UI States
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    try {
+      return window.matchMedia?.('(min-width: 768px)')?.matches ?? false;
+    } catch {
+      return false;
+    }
+  });
   const [isExplanationOpen, setIsExplanationOpen] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastModeRef = useRef<ChatMode>('brainstorm');
   const lastForcedTldsRef = useRef<string[] | null>(null);
 
@@ -208,9 +229,33 @@ function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const autosizeTextarea = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = '0px';
+    const next = Math.min(el.scrollHeight, 160);
+    el.style.height = `${next}px`;
+  }, []);
+
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    // Apply theme to the document root so Tailwind dark: classes work.
+    const root = document.documentElement;
+    if (theme === 'dark') root.classList.add('dark');
+    else root.classList.remove('dark');
+    try {
+      localStorage.setItem('theme', theme);
+    } catch {
+      // ignore
+    }
+  }, [theme]);
+
+  useEffect(() => {
+    autosizeTextarea();
+  }, [inputValue, autosizeTextarea]);
 
   useEffect(() => {
     // Lightweight check: tells the UI if the server has MISTRAL_API_KEY configured.
@@ -239,6 +284,12 @@ function App() {
 
     const userText = inputValue.trim();
     setInputValue('');
+    // reset autosize immediately for snappy UX
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.style.height = '0px';
+    });
     setIsLoading(true);
 
     const mode = detectMode(userText, lastModeRef.current);
@@ -354,12 +405,23 @@ function App() {
 
       // BRAINSTORM MODE: iterative — only show available domains (cards + text), and enforce requested count if provided.
       const desiredAvailableCount = extractRequestedCount(userText);
-      const targetAvailableCount = desiredAvailableCount ?? 3;
+      // If the user explicitly asks for N names, treat that as a hard cap.
+      // If they don't, we use 3 as a minimum target, but we will return *all* available domains we happened to find.
+      const hardAvailableCap = desiredAvailableCount ?? null;
+      const targetAvailableCount = hardAvailableCap ?? 3;
       const forceAiOnly = userForcesAiTld(userText);
       const explicitTlds = extractExplicitTlds(userText);
 
-      const continuation = isContinuationBrainstormRequest(userText);
       const clearsConstraint = userClearsTldConstraint(userText);
+      // Treat short "count-only" followups like "give me only 5" as continuations so we keep
+      // previously forced TLDs (e.g. user said ".ai only" earlier, then adjusts the count).
+      const countOnlyContinuation =
+        desiredAvailableCount != null &&
+        !(explicitTlds && explicitTlds.length > 0) &&
+        !clearsConstraint &&
+        !forceAiOnly &&
+        String(userText || '').trim().split(/\s+/).length <= 8;
+      const continuation = isContinuationBrainstormRequest(userText) || countOnlyContinuation;
 
       // Priority:
       // 1) explicit user TLDs in THIS message (e.g. ".cloud")
@@ -385,6 +447,7 @@ function App() {
       log('Entering BRAINSTORM mode', {
         selectedTlds,
         targetAvailableCount,
+        hardAvailableCap,
         explicitTlds,
         continuation,
         clearsConstraint,
@@ -454,20 +517,28 @@ function App() {
 
       const buildDynamicInstruction = () => {
         const parts: string[] = [SYSTEM_INSTRUCTION];
-        parts.push(`\nHard requirement: return EXACTLY ${targetAvailableCount} AVAILABLE domains in your final answer.`);
+        // We mostly drive the model to emit tool calls / JSON candidates; the UI builds the final answer.
+        // Still, being explicit here improves reliability.
+        if (hardAvailableCap != null) {
+          parts.push(`\nHard requirement: we need EXACTLY ${hardAvailableCap} AVAILABLE domains total. Stop as soon as you have enough.`);
+        } else {
+          parts.push(`\nRequirement: we need AT LEAST ${targetAvailableCount} AVAILABLE domains total. If your checks produce more, that's fine — do not throw them away.`);
+        }
         if (forcedTlds && forcedTlds.length > 0) {
           parts.push(`\nTLD constraint: ONLY use these TLDs: ${forcedTlds.join(', ')}.`);
         }
 
         const remaining = Math.max(0, targetAvailableCount - availableDomains.size);
-        const desiredBatch = clamp(
-          // Heuristic: ask for more names when we still need more availability.
-          Math.ceil(Math.max(MIN_CANDIDATES_PER_CALL, remaining * (forceAiOnly ? 10 : 6))),
-          MIN_CANDIDATES_PER_CALL,
-          MAX_CANDIDATES_PER_CALL
-        );
+        // Heuristic: ask for more candidates when we're aiming for a minimum, but keep it tighter
+        // when the user asked for an exact count.
+        const multiplier = hardAvailableCap != null ? (forceAiOnly ? 6 : 3) : (forceAiOnly ? 10 : 6);
+        const desiredBatch = clamp(Math.ceil(Math.max(MIN_CANDIDATES_PER_CALL, remaining * multiplier)), MIN_CANDIDATES_PER_CALL, MAX_CANDIDATES_PER_CALL);
         parts.push(
           `\nEfficiency requirement: On your NEXT checkDomains tool call, include ${desiredBatch} NEW, unique base names (no TLDs). Avoid repeats. Do not write a final answer yet.`
+        );
+
+        parts.push(
+          `\nIf you cannot emit tool calls for any reason, output ONLY a valid JSON array of ${desiredBatch} NEW base names (strings), no prose.`
         );
 
         if (availableDomains.size > 0) {
@@ -524,11 +595,8 @@ function App() {
           noToolCallStreak += 1;
           // Force the model back onto the tool path.
           const remaining = Math.max(1, targetAvailableCount - availableDomains.size);
-          const desiredBatch = clamp(
-            Math.ceil(Math.max(MIN_CANDIDATES_PER_CALL, remaining * (forceAiOnly ? 10 : 6))),
-            MIN_CANDIDATES_PER_CALL,
-            MAX_CANDIDATES_PER_CALL
-          );
+          const multiplier = hardAvailableCap != null ? (forceAiOnly ? 6 : 3) : (forceAiOnly ? 10 : 6);
+          const desiredBatch = clamp(Math.ceil(Math.max(MIN_CANDIDATES_PER_CALL, remaining * multiplier)), MIN_CANDIDATES_PER_CALL, MAX_CANDIDATES_PER_CALL);
 
           // Fallback: if the model won't emit tool_calls, ask for strict JSON list and check ourselves.
           const parsedNames = tryParseJsonNameList(result?.text || '');
@@ -540,7 +608,12 @@ function App() {
             const availabilityResults = await checkMultipleDomains(parsedNames, finalTldsToCheck);
             for (const r of availabilityResults) {
               log(`Tested ${r.domain}: ${r.status}`);
-              if (r?.status === 'available' && r?.domain) availableDomains.set(r.domain, r);
+              if (r?.status === 'available' && r?.domain) {
+                if (hardAvailableCap == null || availableDomains.size < hardAvailableCap) {
+                  availableDomains.set(r.domain, r);
+                }
+              }
+              if (hardAvailableCap != null && availableDomains.size >= hardAvailableCap) break;
             }
             modelCallCount += 1;
             // Continue the loop — we may already have enough.
@@ -557,7 +630,7 @@ function App() {
               text:
                 noToolCallStreak >= 2
                   ? `Internal instruction: Tool calls are not working. Output ONLY a valid JSON array (no prose) with ${desiredBatch} NEW base names (strings), no TLDs, no dots, no spaces. Example: ["nova", "cloudly"].`
-                  : `Internal instruction: We still need ${remaining} more AVAILABLE domains. Generate ${desiredBatch} NEW candidate base names (no TLDs) and CALL checkDomains immediately. Do not output a final answer yet.`
+                  : `Internal instruction: We still need ${remaining} more AVAILABLE domains. Generate ${desiredBatch} NEW candidate base names (no TLDs) and CALL checkDomains immediately. If you can't call tools, output ONLY JSON.`
             }
           ];
           modelCallCount += 1;
@@ -602,8 +675,11 @@ function App() {
               for (const r of availabilityResults) {
                 log(`Tested ${r.domain}: ${r.status}`);
                 if (r?.status === 'available' && r?.domain) {
-                  availableDomains.set(r.domain, r);
+                  if (hardAvailableCap == null || availableDomains.size < hardAvailableCap) {
+                    availableDomains.set(r.domain, r);
+                  }
                 }
+                if (hardAvailableCap != null && availableDomains.size >= hardAvailableCap) break;
               }
 
               log('Tool results (BRAINSTORM):', {
@@ -630,10 +706,15 @@ function App() {
         workingMessages = [...workingMessages.slice(0, -1), modelMsg];
 
         modelCallCount += 1;
+
+        // If user asked for an explicit limit, stop immediately once we reach it.
+        if (hardAvailableCap != null && availableDomains.size >= hardAvailableCap) break;
       }
 
       // If we never got a final assistant message without tool calls, fall back to a minimal summary.
-      const finalList = Array.from(availableDomains.values()).slice(0, targetAvailableCount);
+      const finalList = hardAvailableCap != null
+        ? Array.from(availableDomains.values()).slice(0, hardAvailableCap)
+        : Array.from(availableDomains.values());
       const finalLines = finalList.map(r => `- ${r.domain}`);
 
       const french = isProbablyFrench(userText);
@@ -662,13 +743,16 @@ function App() {
       log('Brainstorm final', {
         found: finalList.length,
         targetAvailableCount,
+        hardAvailableCap,
         forcedTlds,
         domains: finalList.map(d => d.domain)
       });
 
       // Update UI: show ALL available domains found across the brainstorm loops.
       // We provide a synthetic tool response so the cards can render everything (no duplicates).
-      const allAvailable = Array.from(availableDomains.values()).slice(0, targetAvailableCount);
+      const allAvailable = hardAvailableCap != null
+        ? Array.from(availableDomains.values()).slice(0, hardAvailableCap)
+        : Array.from(availableDomains.values());
       const toolCallId = 'available';
       const toolCallArgs = {
         names: allAvailable.map(r => r.baseName).filter(Boolean),
@@ -739,8 +823,35 @@ function App() {
     );
   };
 
+  const setTlds = (tlds: string[]) => {
+    const next = Array.from(new Set(tlds)).filter(Boolean);
+    setSelectedTlds(next.length > 0 ? next : ['.com']);
+  };
+
+  const quickPrompts = useMemo(
+    () => [
+      {
+        label: 'AI tool for busy founders',
+        value: 'I need a brand name for an AI tool that helps busy founders turn meeting notes into clear action items. Modern, short, easy to spell.'
+      },
+      {
+        label: 'SaaS B2B (clean & pro)',
+        value: 'Suggest names for a B2B SaaS that automates invoice follow-up. Clean, professional, not too playful.'
+      },
+      {
+        label: 'App écolo (FR)',
+        value: "Je cherche un nom pour une app qui aide à réduire le gaspillage alimentaire. Style moderne, prononçable, pas trop long."
+      },
+      {
+        label: 'Creator economy',
+        value: 'Brand names for a platform that helps creators sell digital products. Trendy but timeless.'
+      }
+    ],
+    []
+  );
+
   return (
-    <div className="flex h-screen bg-slate-50 relative overflow-hidden">
+    <div className="app-bg flex h-dvh bg-[rgb(var(--c-bg))] text-[rgb(var(--c-fg))] relative overflow-hidden">
       
       {/* Sidebar (Desktop & Mobile) */}
       <Sidebar 
@@ -748,41 +859,150 @@ function App() {
         onClose={() => setIsSidebarOpen(false)}
         selectedTlds={selectedTlds}
         onToggleTld={toggleTld}
+        onSetTlds={setTlds}
         onOpenExplanation={() => setIsExplanationOpen(true)}
       />
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col relative w-full h-full">
+      <main
+        className={`flex-1 flex flex-col relative w-full h-full min-h-0 transition-[padding] duration-300 ${
+          isSidebarOpen ? 'md:pl-80' : 'md:pl-0'
+        }`}
+      >
+
+        {/* Desktop Header */}
+        <header className="hidden md:flex items-center justify-between gap-3 px-6 py-4 sticky top-0 z-20 border-b border-[rgb(var(--c-ink)/0.12)] surface">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              onClick={() => setIsSidebarOpen(v => !v)}
+              className="focus-ring inline-flex items-center justify-center w-10 h-10 rounded-xl surface hover:bg-[rgb(var(--c-surface)/0.9)] transition"
+              aria-label={isSidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
+              title={isSidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
+            >
+              <PanelLeft size={18} className="text-[rgb(var(--c-muted))]" />
+            </button>
+
+            <div className="flex items-center gap-2">
+              <div className="brand-badge p-2 rounded-xl">
+                <Sparkles className="text-[rgb(12_16_26)]" size={18} />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-base font-display font-bold tracking-tight truncate">Namer.ai</h1>
+                <p className="text-xs text-[rgb(var(--c-muted))] truncate">Premium name ideas + real-time domain checks</p>
+              </div>
+            </div>
+
+            {isBackendConfigured === false && (
+              <div className="ml-2 inline-flex items-center gap-2 rounded-full border border-red-200/70 dark:border-red-900/40 bg-red-50/70 dark:bg-red-950/30 px-3 py-1 text-xs font-semibold text-red-700 dark:text-red-200">
+                <AlertCircle size={14} />
+                Backend not configured
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="hidden lg:flex items-center gap-1 rounded-full border border-[rgb(var(--c-ink)/0.12)] bg-[rgb(var(--c-surface)/0.50)] px-2 py-1">
+              <span className="text-xs font-semibold text-[rgb(var(--c-muted))] px-1">Checking</span>
+              {selectedTlds.slice(0, 4).map(tld => (
+                <span key={tld} className="text-xs font-semibold px-2 py-1 rounded-full bg-[rgb(var(--c-surface)/0.65)] border border-[rgb(var(--c-ink)/0.10)] text-[rgb(var(--c-fg))]">
+                  {tld}
+                </span>
+              ))}
+              {selectedTlds.length > 4 && (
+                <span className="text-xs font-semibold px-2 py-1 rounded-full bg-[rgb(var(--c-surface)/0.65)] border border-[rgb(var(--c-ink)/0.10)] text-[rgb(var(--c-fg))]">
+                  +{selectedTlds.length - 4}
+                </span>
+              )}
+            </div>
+
+            <button
+              onClick={() => setIsExplanationOpen(true)}
+              className="focus-ring inline-flex items-center justify-center rounded-xl surface hover:bg-[rgb(var(--c-surface)/0.9)] transition px-3 h-10 text-sm font-semibold"
+            >
+              How it works
+            </button>
+
+            <button
+              onClick={() => setTheme(t => (t === 'dark' ? 'light' : 'dark'))}
+              className="focus-ring inline-flex items-center justify-center w-10 h-10 rounded-xl surface hover:bg-[rgb(var(--c-surface)/0.9)] transition"
+              aria-label="Toggle theme"
+              title="Toggle theme"
+            >
+              {theme === 'dark' ? (
+                <Sun size={18} className="text-[rgb(var(--c-fg))]" />
+              ) : (
+                <Moon size={18} className="text-[rgb(var(--c-fg))]" />
+              )}
+            </button>
+          </div>
+        </header>
         
         {/* Mobile Header */}
-        <header className="md:hidden bg-white border-b border-slate-200 px-4 py-3 flex justify-between items-center sticky top-0 z-20 shadow-sm">
-          <div className="flex items-center gap-2 text-indigo-700">
-            <div className="bg-indigo-600 p-1.5 rounded-lg">
-               <Sparkles className="text-white" size={16} />
+        <header className="md:hidden surface border-b border-[rgb(var(--c-ink)/0.12)] px-4 py-3 flex justify-between items-center sticky top-0 z-20 shadow-sm">
+          <div className="flex items-center gap-2">
+            <div className="brand-badge p-1.5 rounded-lg">
+               <Sparkles className="text-[rgb(12_16_26)]" size={16} />
             </div>
-            <h1 className="text-lg font-bold tracking-tight">Namer.ai</h1>
+            <h1 className="text-lg font-display font-bold tracking-tight">Namer.ai</h1>
           </div>
           
-          <button 
-            onClick={() => setIsSidebarOpen(true)}
-            className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg"
-          >
-            <Menu size={24} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setTheme(t => (t === 'dark' ? 'light' : 'dark'))}
+              className="focus-ring p-2 text-[rgb(var(--c-muted))] hover:bg-[rgb(var(--c-surface)/0.70)] rounded-xl transition"
+              aria-label="Toggle theme"
+            >
+              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+            </button>
+            <button 
+              onClick={() => setIsSidebarOpen(true)}
+              className="focus-ring p-2 text-[rgb(var(--c-muted))] hover:bg-[rgb(var(--c-surface)/0.70)] rounded-xl transition"
+              aria-label="Open menu"
+            >
+              <Menu size={22} />
+            </button>
+          </div>
         </header>
 
         {/* Chat History */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-6 scroll-smooth bg-slate-50/50">
-          <div className="max-w-3xl mx-auto flex flex-col pt-4">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-8 pb-28 md:pb-32 scroll-smooth custom-scrollbar">
+          <div className="max-w-3xl mx-auto flex flex-col pt-6 md:pt-8">
             {messages.map(msg => (
               <ChatMessage key={msg.id} message={msg} />
             ))}
+
+            {/* Quick-start (only before the first user message) */}
+            {messages.length === 1 && !isLoading && (
+              <div className="mt-2 mb-10">
+                <div className="rounded-3xl surface shadow-soft p-5 md:p-6">
+                  <h2 className="text-sm md:text-base font-display font-bold">Start with a great brief</h2>
+                  <p className="mt-1 text-sm text-[rgb(var(--c-muted))]">
+                    Click an example to prefill, or just describe your project in one sentence.
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {quickPrompts.map(p => (
+                      <button
+                        key={p.label}
+                        onClick={() => {
+                          setInputValue(p.value);
+                          requestAnimationFrame(() => textareaRef.current?.focus());
+                        }}
+                        className="focus-ring inline-flex items-center rounded-full surface hover:bg-[rgb(var(--c-surface)/0.9)] px-3.5 py-2 text-sm font-semibold transition"
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {isLoading && (
               <div className="flex justify-start mb-6">
-                 <div className="bg-white border border-slate-200 px-4 py-3 rounded-2xl rounded-tl-none shadow-sm flex items-center gap-2">
-                   <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-                   <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-                   <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"></div>
+                 <div className="surface px-4 py-3 rounded-2xl rounded-tl-none shadow-soft flex items-center gap-2">
+                   <div className="w-2 h-2 bg-[rgb(var(--c-accent2))] rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                   <div className="w-2 h-2 bg-[rgb(var(--c-accent2))] rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                   <div className="w-2 h-2 bg-[rgb(var(--c-accent2))] rounded-full animate-bounce"></div>
                  </div>
               </div>
             )}
@@ -791,35 +1011,37 @@ function App() {
         </div>
 
         {/* Input Area */}
-        <div className="p-4 bg-white border-t border-slate-200">
-          <div className="max-w-3xl mx-auto relative">
-            <textarea
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Describe your brand idea (e.g., 'A sustainable coffee shop with a tech vibe')..."
-              className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-5 pr-14 py-4 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none shadow-sm text-slate-800 placeholder:text-slate-400 min-h-[60px] max-h-[120px]"
-              rows={1}
-              disabled={isLoading}
-            />
-            <button
-              onClick={handleSendMessage}
-              disabled={!inputValue.trim() || isLoading}
-              className="absolute right-3 bottom-3 p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:hover:bg-indigo-600 transition-colors shadow-sm"
-            >
-              <Send size={20} />
-            </button>
-          </div>
-          <div className="max-w-3xl mx-auto mt-2 flex justify-between items-center px-2">
-             <p className="text-xs text-slate-400">
-               Checking: {selectedTlds.slice(0, 3).join(', ')}{selectedTlds.length > 3 ? ` +${selectedTlds.length - 3} more` : ''}
-             </p>
-             {isBackendConfigured === false && (
-               <div className="flex items-center text-xs text-red-500 gap-1 font-medium">
-                  <AlertCircle size={12} />
-                  <span>Backend not configured</span>
-               </div>
-             )}
+        <div className="sticky bottom-0 z-20 p-4 md:p-6 pb-[calc(1rem+env(safe-area-inset-bottom))] border-t border-[rgb(var(--c-ink)/0.12)] surface-strong">
+          <div className="max-w-3xl mx-auto">
+            <div className="relative rounded-3xl surface shadow-soft">
+              <textarea
+                ref={textareaRef}
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Describe your project (tone, audience, constraints)…"
+                className="focus-ring w-full bg-transparent rounded-3xl pl-5 pr-14 py-4 resize-none text-[rgb(var(--c-fg))] placeholder:text-[rgb(var(--c-muted))] min-h-[58px] max-h-[160px]"
+                rows={1}
+                disabled={isLoading}
+              />
+              <button
+                onClick={handleSendMessage}
+                disabled={!inputValue.trim() || isLoading}
+                className="focus-ring absolute right-3 bottom-3 inline-flex items-center justify-center w-11 h-11 rounded-2xl btn-primary disabled:opacity-50 transition"
+                aria-label="Send message"
+              >
+                <Send size={18} />
+              </button>
+            </div>
+
+            <div className="mt-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-1">
+              <p className="text-xs text-[rgb(var(--c-muted))]">
+                <span className="font-semibold">Tip:</span> Press <span className="font-semibold">Enter</span> to send, <span className="font-semibold">Shift+Enter</span> for a new line.
+              </p>
+              <p className="text-xs text-[rgb(var(--c-muted))]">
+                Checking {selectedTlds.slice(0, 3).join(', ')}{selectedTlds.length > 3 ? ` +${selectedTlds.length - 3} more` : ''}
+              </p>
+            </div>
           </div>
         </div>
       </main>

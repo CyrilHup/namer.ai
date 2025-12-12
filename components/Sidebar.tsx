@@ -7,6 +7,7 @@ interface SidebarProps {
   onClose: () => void;
   selectedTlds: string[];
   onToggleTld: (tld: string) => void;
+  onSetTlds: (tlds: string[]) => void;
   onOpenExplanation: () => void;
 }
 
@@ -15,8 +16,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onClose, 
   selectedTlds, 
   onToggleTld,
+  onSetTlds,
   onOpenExplanation 
 }) => {
+  const presets: Array<{ label: string; tlds: string[] }> = [
+    { label: 'Popular', tlds: ['.com', '.io', '.ai', '.co', '.app'] },
+    { label: 'Tech', tlds: ['.ai', '.io', '.dev', '.app', '.cloud', '.tech', '.studio'] },
+    { label: 'All', tlds: AVAILABLE_TLDS },
+  ];
+
   return (
     <>
       {/* Overlay for mobile */}
@@ -29,21 +37,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Sidebar Container */}
       <aside className={`
-        fixed inset-y-0 left-0 z-40 w-72 bg-white border-r border-slate-200 transform transition-transform duration-300 ease-in-out
-        md:translate-x-0 md:static md:h-screen md:shrink-0
-        ${isOpen ? 'translate-x-0' : '-translate-x-full'}
+        fixed inset-y-0 left-0 z-40 w-80 surface border-r border-[rgb(var(--c-ink)/0.12)] transform transition-all duration-300 ease-in-out
+        ${isOpen ? 'translate-x-0 pointer-events-auto' : '-translate-x-full pointer-events-none'}
       `}>
         <div className="flex flex-col h-full">
           
           {/* Header */}
-          <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-indigo-700">
-              <div className="bg-indigo-600 p-2 rounded-lg">
-                <Sparkles className="text-white" size={20} />
+          <div className="p-6 border-b border-[rgb(var(--c-ink)/0.12)] flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="brand-badge p-2 rounded-xl">
+                <Sparkles className="text-[rgb(12_16_26)]" size={20} />
               </div>
-              <h1 className="text-xl font-bold tracking-tight">Namer.ai</h1>
+              <div>
+                <h1 className="text-xl font-display font-bold tracking-tight">Namer.ai</h1>
+                <p className="text-xs text-[rgb(var(--c-muted))]">Controls</p>
+              </div>
             </div>
-            <button onClick={onClose} className="md:hidden text-slate-400 hover:text-slate-600">
+            <button onClick={onClose} className="md:hidden focus-ring text-[rgb(var(--c-muted))] hover:text-[rgb(var(--c-fg))] rounded-lg">
               <X size={24} />
             </button>
           </div>
@@ -51,9 +61,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* TLD Selection */}
           <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
             <div className="mb-6">
-              <p className="text-sm text-slate-600 mb-4 leading-relaxed">
-                Configure which extensions to check when brainstorming new names.
+              <p className="text-sm text-[rgb(var(--c-muted))] mb-4 leading-relaxed">
+                Choose which extensions are checked during brainstorming.
               </p>
+
+              <div className="flex flex-wrap gap-2 mb-5">
+                {presets.map(p => (
+                  <button
+                    key={p.label}
+                    onClick={() => onSetTlds(p.tlds)}
+                    className="focus-ring inline-flex items-center rounded-full surface hover:bg-[rgb(var(--c-surface)/0.9)] px-3 py-1.5 text-xs font-bold transition"
+                  >
+                    {p.label}
+                  </button>
+                ))}
+                <button
+                  onClick={() => onSetTlds(['.com', '.io', '.ai'])}
+                  className="focus-ring inline-flex items-center rounded-full surface hover:bg-[rgb(var(--c-surface)/0.9)] px-3 py-1.5 text-xs font-bold transition"
+                >
+                  Reset
+                </button>
+              </div>
               
               <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
                 Extensions
@@ -67,10 +95,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       key={tld}
                       onClick={() => onToggleTld(tld)}
                       className={`
-                        text-sm font-medium py-2 px-3 rounded-lg transition-all border text-left
+                        focus-ring text-sm font-semibold py-2.5 px-3 rounded-xl transition-all border text-left
                         ${isSelected 
-                          ? 'bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm' 
-                          : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-200 hover:text-indigo-600'}
+                          ? 'bg-[rgb(var(--c-accent2)/0.14)] border-[rgb(var(--c-accent2)/0.32)] text-[rgb(var(--c-fg))] shadow-sm'
+                          : 'bg-[rgb(var(--c-surface)/0.55)] border-[rgb(var(--c-ink)/0.12)] text-[rgb(var(--c-fg))] hover:border-[rgb(var(--c-accent)/0.35)]'}
                       `}
                     >
                       {tld}
@@ -82,12 +110,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           {/* Footer / Explanation */}
-          <div className="p-4 border-t border-slate-100 bg-slate-50/50">
+          <div className="p-4 border-t border-[rgb(var(--c-ink)/0.12)] bg-[rgb(var(--c-surface)/0.35)]">
             <button 
               onClick={onOpenExplanation}
-              className="flex items-center gap-3 text-sm text-slate-600 hover:text-indigo-600 font-medium transition-colors w-full p-3 rounded-xl hover:bg-white hover:shadow-sm border border-transparent hover:border-slate-200"
+              className="focus-ring flex items-center gap-3 text-sm hover:text-[rgb(var(--c-fg))] font-semibold transition w-full p-3 rounded-2xl hover:bg-[rgb(var(--c-surface)/0.7)] hover:shadow-soft border border-transparent hover:border-[rgb(var(--c-ink)/0.12)]"
             >
-              <div className="bg-white p-1.5 rounded-md shadow-sm border border-slate-100 text-indigo-500">
+              <div className="bg-[rgb(var(--c-surface)/0.75)] p-1.5 rounded-xl shadow-sm border border-[rgb(var(--c-ink)/0.12)] text-[rgb(var(--c-accent2))]">
                 <Info size={16} />
               </div>
               <span>How it works</span>

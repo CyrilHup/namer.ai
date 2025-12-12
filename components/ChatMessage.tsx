@@ -24,7 +24,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
         {/* Avatar */}
         <div className={`
           flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center
-          ${isUser ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200 text-slate-600 shadow-sm'}
+          ${isUser ? 'btn-primary text-[rgb(12_16_26)] shadow-soft' : 'surface border border-[rgb(var(--c-ink)/0.12)] text-[rgb(var(--c-fg))] shadow-soft'}
         `}>
           {isUser ? <User size={16} /> : <Bot size={16} />}
         </div>
@@ -32,10 +32,10 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
         {/* Bubble */}
         <div className={`flex flex-col gap-2 ${isUser ? 'items-end' : 'items-start'}`}>
           <div className={`
-            px-5 py-3 rounded-2xl text-sm leading-relaxed shadow-sm
+            px-5 py-3 rounded-2xl text-sm leading-relaxed shadow-soft
             ${isUser 
-              ? 'bg-indigo-600 text-white rounded-tr-none' 
-              : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'}
+              ? 'btn-primary text-[rgb(12_16_26)] rounded-tr-none' 
+              : 'surface border border-[rgb(var(--c-ink)/0.12)] text-[rgb(var(--c-fg))] rounded-tl-none'}
           `}>
              {isPendingAssistant ? (
                <div className="flex items-center gap-2">
@@ -45,18 +45,18 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
                  </span>
                </div>
              ) : (
-               <MarkdownText text={message.text} />
+               <MarkdownText text={message.text} className={isUser ? 'text-[rgb(12_16_26)] opacity-90' : 'text-[rgb(var(--c-fg))]'} />
              )}
           </div>
 
           {/* Tool Results (Domain Cards) */}
           {message.toolResponses && message.toolResponses.length > 0 && (
              <div className="mt-2 w-full">
-               <div className="flex items-center gap-2 mb-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  <Cpu size={12} />
-                  <span>Availability Check</span>
+                 <div className="flex items-center gap-2 mb-2 text-xs font-bold text-[rgb(var(--c-muted))] uppercase tracking-wider">
+                  <Cpu size={12} className="opacity-80" />
+                  <span>Domain availability</span>
                </div>
-               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
                   {message.toolResponses.map((toolResp, idx) => {
                      // The tool response content is what we returned from our service
                      // It should be an array of DomainCheckResult

@@ -1,11 +1,153 @@
 @import "tailwindcss";
 
+/* Tailwind v4: make `dark:` respond to a `.dark` class (not only prefers-color-scheme media). */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  /*
+    Signature theme: "paper + ink" with neon accents.
+    Values are RGB triplets to enable alpha usage: rgb(var(--c-*) / <alpha>).
+  */
+  --c-bg: 251 247 239;          /* paper */
+  --c-fg: 12 16 26;            /* ink */
+  --c-ink: 12 16 26;
+  --c-muted: 92 104 122;
+  --c-surface: 255 255 255;
+
+  --c-accent: 183 255 74;      /* neon lime */
+  --c-accent2: 255 61 127;     /* hot pink */
 }
 
-body {
-  font-family: 'Inter', sans-serif;
+/* Dark mode overrides (still driven by `.dark` class) */
+.dark {
+  --c-bg: 7 9 13;
+  --c-fg: 244 246 252;
+  --c-ink: 244 246 252;
+  --c-muted: 152 162 179;
+  --c-surface: 14 18 26;
+
+  --c-accent: 183 255 74;
+  --c-accent2: 255 61 127;
+}
+
+html, body {
+  font-family: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+@layer base {
+  html {
+    height: 100%;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    min-height: 100%;
+  }
+
+  ::selection {
+    background: rgb(var(--c-accent2) / 0.25);
+  }
+}
+
+@layer utilities {
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.7) transparent;
+  }
+
+  .app-bg {
+    position: relative;
+  }
+
+  .app-bg::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(1100px 650px at 12% 8%, rgb(var(--c-accent2) / 0.14), transparent 62%),
+      radial-gradient(1000px 650px at 88% 10%, rgb(var(--c-accent) / 0.12), transparent 60%),
+      radial-gradient(1200px 700px at 55% 92%, rgb(var(--c-accent2) / 0.08), transparent 60%),
+      /* subtle paper shading */
+      linear-gradient(to bottom, rgb(var(--c-ink) / 0.03), transparent 35%),
+      /* grid */
+      linear-gradient(90deg, rgb(var(--c-ink) / 0.045) 1px, transparent 1px),
+      linear-gradient(rgb(var(--c-ink) / 0.045) 1px, transparent 1px);
+    background-size:
+      auto,
+      auto,
+      auto,
+      auto,
+      44px 44px,
+      44px 44px;
+    background-position:
+      0 0,
+      0 0,
+      0 0,
+      0 0,
+      0 0,
+      0 0;
+    filter: saturate(1.1);
+  }
+
+  .app-bg::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.075;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='.4'/%3E%3C/svg%3E");
+  }
+
+  /* Reusable UI primitives (handy to avoid the default Tailwind "AI SaaS" look). */
+  .surface {
+    background: rgb(var(--c-surface) / 0.72);
+    border: 1px solid rgb(var(--c-ink) / 0.12);
+    backdrop-filter: blur(14px);
+  }
+
+  .surface-strong {
+    background: rgb(var(--c-surface) / 0.84);
+    border: 1px solid rgb(var(--c-ink) / 0.14);
+    backdrop-filter: blur(16px);
+  }
+
+  .brand-stroke {
+    box-shadow:
+      0 0 0 1px rgb(var(--c-ink) / 0.12),
+      0 10px 30px rgb(2 6 23 / 0.10);
+  }
+
+  .brand-badge {
+    background: linear-gradient(180deg, rgb(var(--c-accent2) / 0.95), rgb(var(--c-accent) / 0.92));
+    box-shadow:
+      0 12px 30px rgb(2 6 23 / 0.14),
+      inset 0 1px 0 rgb(255 255 255 / 0.30);
+  }
+
+  .brand-hero {
+    background: linear-gradient(135deg, rgb(var(--c-accent2) / 0.95), rgb(var(--c-accent) / 0.92));
+    color: rgb(12 16 26);
+  }
+
+  .btn-primary {
+    background: linear-gradient(180deg, rgb(var(--c-accent2) / 0.95), rgb(var(--c-accent) / 0.92));
+    color: rgb(12 16 26);
+    box-shadow:
+      0 12px 30px rgb(2 6 23 / 0.14),
+      inset 0 1px 0 rgb(255 255 255 / 0.35);
+  }
+
+  .focus-ring {
+    outline: none;
+  }
+
+  .focus-ring:focus-visible {
+    box-shadow: 0 0 0 4px rgb(var(--c-accent2) / 0.22);
+  }
 }
 
 /* Custom scrollbar for webkit */
@@ -19,10 +161,10 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: rgb(148 163 184 / 0.75);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: rgb(148 163 184 / 0.95);
 }

@@ -201,20 +201,25 @@ export const buildChatResponse = async (
     };
   }
 
-  const mistralRes = await fetch('https://api.mistral.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model,
-      messages: safeMessages,
-      tools: [checkDomainsTool],
-      tool_choice: 'auto',
-      temperature: 0.9
-    })
-  });
+  const callMistral = async (opts?: { toolChoice?: 'auto' | 'any'; temperature?: number }) => {
+    const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        messages: safeMessages,
+        tools: [checkDomainsTool],
+        tool_choice: opts?.toolChoice ?? 'auto',
+        temperature: opts?.temperature ?? 0.9
+      })
+    });
+    return res;
+  };
+
+  const mistralRes = await callMistral();
 
   if (!mistralRes.ok) {
     const text = await mistralRes.text().catch(() => '');
@@ -231,10 +236,26 @@ export const buildChatResponse = async (
   }
 
   const data: any = await mistralRes.json();
-  const msg = data?.choices?.[0]?.message;
-  const assistantText: string = msg?.content ?? '';
+  let msg = data?.choices?.[0]?.message;
+  let assistantText: string = msg?.content ?? '';
+  let functionCalls = parseMistralToolCalls(msg?.tool_calls ?? []);
 
-  const functionCalls = parseMistralToolCalls(msg?.tool_calls ?? []);
+  // Reliability retry: sometimes the model returns an empty assistant message with no tool calls.
+  // That forces the client into extra "nudge" generations. Retry once with a stronger tool bias.
+  if (String(assistantText || '').trim() === '' && functionCalls.length === 0) {
+    const retryRes = await callMistral({ toolChoice: 'any', temperature: 0.2 }).catch(() => null as any);
+    if (retryRes && retryRes.ok) {
+      const retryData: any = await retryRes.json().catch(() => null);
+      const retryMsg = retryData?.choices?.[0]?.message;
+      const retryText: string = retryMsg?.content ?? '';
+      const retryCalls = parseMistralToolCalls(retryMsg?.tool_calls ?? []);
+      if (String(retryText || '').trim() !== '' || retryCalls.length > 0) {
+        msg = retryMsg;
+        assistantText = retryText;
+        functionCalls = retryCalls;
+      }
+    }
+  }
 
   // Reliability fallback: if the model "says" it will check but forgets tool_calls,
   // synthesize a checkDomains tool call from the user's message.
