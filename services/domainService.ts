@@ -1,5 +1,26 @@
 import { DomainCheckResult } from '../types';
 
+const normalizeBaseName = (name: string): string | null => {
+  const raw = String(name || '').trim();
+  if (!raw) return null;
+  // lowercase, allow a-z, 0-9 and hyphens, strip everything else
+  const cleaned = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/^-+/, '')
+    .replace(/-+$/, '');
+
+  if (!cleaned) return null;
+  // DNS label length limit (63); keep it safe.
+  return cleaned.slice(0, 63);
+};
+
+const normalizeTld = (tld: string): string | null => {
+  const raw = String(tld || '').trim().toLowerCase();
+  if (!raw) return null;
+  return raw.startsWith('.') ? raw : `.${raw}`;
+};
+
 /**
  * Checks domain availability using Google's DNS-over-HTTPS API.
  * 
@@ -10,7 +31,9 @@ import { DomainCheckResult } from '../types';
  * This is a frontend-only approximation. For production, use a real WHOIS/RDAP API.
  */
 export const checkDomainAvailability = async (baseName: string, tld: string): Promise<DomainCheckResult> => {
-  const domain = `${baseName.toLowerCase()}${tld}`;
+  const cleanBase = normalizeBaseName(baseName) || String(baseName || '').toLowerCase();
+  const cleanTld = normalizeTld(tld) || String(tld || '').toLowerCase();
+  const domain = `${cleanBase}${cleanTld}`;
   const url = `https://dns.google/resolve?name=${domain}&type=A`;
 
   try {
@@ -30,30 +53,30 @@ export const checkDomainAvailability = async (baseName: string, tld: string): Pr
     return {
       domain,
       status,
-      tld,
-      baseName
+      tld: cleanTld,
+      baseName: cleanBase
     };
   } catch (error) {
     console.error(`Error checking domain ${domain}:`, error);
     return {
       domain,
       status: 'unknown',
-      tld,
-      baseName
+      tld: cleanTld,
+      baseName: cleanBase
     };
   }
 };
 
 export const checkMultipleDomains = async (baseNames: string[], tlds: string[]): Promise<DomainCheckResult[]> => {
-  const promises: Promise<DomainCheckResult>[] = [];
-  
-  for (const name of baseNames) {
-    // Sanitize name (remove spaces, special chars)
-    const cleanName = name.replace(/[^a-zA-Z0-9-]/g, '');
-    if (!cleanName) continue;
+  const names = Array.from(
+    new Set((baseNames || []).map(normalizeBaseName).filter((v): v is string => Boolean(v)))
+  );
+  const exts = Array.from(new Set((tlds || []).map(normalizeTld).filter((v): v is string => Boolean(v))));
 
-    for (const tld of tlds) {
-      promises.push(checkDomainAvailability(cleanName, tld));
+  const promises: Promise<DomainCheckResult>[] = [];
+  for (const name of names) {
+    for (const tld of exts) {
+      promises.push(checkDomainAvailability(name, tld));
     }
   }
 

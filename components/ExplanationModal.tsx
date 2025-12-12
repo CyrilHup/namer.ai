@@ -29,7 +29,7 @@ export const ExplanationModal: React.FC<ExplanationModalProps> = ({ isOpen, onCl
             <div>
               <h4 className="font-semibold text-slate-800 mb-1">AI Brainstorming</h4>
               <p className="text-sm text-slate-600 leading-relaxed">
-                We use Google's advanced Gemini 2.5 AI models to generate creative, context-aware brand names based on your project description.
+                We use Mistral AI models to generate creative, context-aware brand names based on your project description.
               </p>
             </div>
           </div>

@@ -15,6 +15,12 @@ View your app in AI Studio: https://ai.studio/apps/drive/1mZVZ0OjmYQ4ni7d_fSRarE
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. Set `MISTRAL_API_KEY` in `.env.local` (recommended) to your Mistral API key
+   - Optional: set `MISTRAL_MODEL` (defaults to `mistral-small-latest`)
 3. Run the app:
    `npm run dev`
+
+### Notes
+
+- The browser never receives your API key. Calls go to `/api/chat`.
+- You can verify server configuration via `GET /api/health`.

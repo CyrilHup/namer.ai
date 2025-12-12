@@ -9,6 +9,7 @@ interface DomainCardProps {
 export const DomainCard: React.FC<DomainCardProps> = ({ result }) => {
   const isAvailable = result.status === 'available';
   const isTaken = result.status === 'taken';
+  const verifyUrl = `https://www.namecheap.com/domains/registration/results/?domain=${encodeURIComponent(result.domain)}`;
 
   return (
     <div className={`
@@ -40,17 +41,31 @@ export const DomainCard: React.FC<DomainCardProps> = ({ result }) => {
         </div>
       </div>
 
-      {isAvailable && (
-        <a 
-          href={`https://www.namecheap.com/domains/registration/results/?domain=${result.domain}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="group flex items-center gap-1 text-xs font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-100 hover:bg-emerald-200 px-3 py-1.5 rounded-md transition-all"
-        >
-          Buy
-          <ExternalLink size={12} className="opacity-50 group-hover:opacity-100" />
-        </a>
-      )}
+      <div className="flex items-center gap-2">
+        {isAvailable ? (
+          <a
+            href={verifyUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group flex items-center gap-1 text-xs font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-100 hover:bg-emerald-200 px-3 py-1.5 rounded-md transition-all"
+            title="Go to registrar to register this domain"
+          >
+            Buy
+            <ExternalLink size={12} className="opacity-50 group-hover:opacity-100" />
+          </a>
+        ) : (
+          <a
+            href={verifyUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group flex items-center gap-1 text-xs font-bold text-slate-700 hover:text-slate-900 bg-white/70 hover:bg-white px-3 py-1.5 rounded-md transition-all border border-slate-200"
+            title="Open a registrar search so you can verify availability yourself"
+          >
+            Verify
+            <ExternalLink size={12} className="opacity-50 group-hover:opacity-100" />
+          </a>
+        )}
+      </div>
     </div>
   );
 };

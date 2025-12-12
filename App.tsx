@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Menu, Sparkles, AlertCircle } from 'lucide-react';
 import { Message, Role, DomainCheckResult } from './types';
-import { sendMessageToBackend } from './services/geminiService';
+import { sendMessageToBackend } from './services/chatService';
 import { checkMultipleDomains } from './services/domainService';
 import { ChatMessage } from './components/ChatMessage';
 import { Sidebar } from './components/Sidebar';
@@ -15,7 +15,9 @@ const SYSTEM_INSTRUCTION = `You are Namer.ai, a creative naming expert.
             When you suggest specific names, ALWAYS call the 'checkDomains' tool with the list of names (base names only, no extension).
             Do this immediately so the user sees availability.
             Don't ask "should I check availability?", just do it for the best suggestions.
-            If the user asks to check a specific name, use the tool.
+            If the user asks to check a specific name or a specific full domain (e.g. "namer.ia"), use the tool.
+            If a specific TLD is mentioned by the user, include it in the tool call as { tlds: ['.ia'] } (or the relevant TLD).
+            If the user says "check again" / "again" / "recheck", you MUST run another availability check and expand the TLD set beyond the previous check (include multiple additional extensions, not just one).
             `;
 
 const INITIAL_MESSAGE: Message = {
@@ -29,6 +31,7 @@ function App() {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedTlds, setSelectedTlds] = useState<string[]>(['.com', '.io', '.ai']);
+  const [isBackendConfigured, setIsBackendConfigured] = useState<boolean | null>(null);
   
   // UI States
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -43,6 +46,28 @@ function App() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    // Lightweight check: tells the UI if the server has MISTRAL_API_KEY configured.
+    // (No secrets are exposed to the browser.)
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/health');
+        if (!res.ok) {
+          if (!cancelled) setIsBackendConfigured(false);
+          return;
+        }
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled) setIsBackendConfigured(Boolean(data?.ok));
+      } catch {
+        if (!cancelled) setIsBackendConfigured(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSendMessage = useCallback(async () => {
     if (!inputValue.trim() || isLoading) return;
@@ -74,8 +99,9 @@ function App() {
         // We have tool calls. Process them.
         const toolResponses = await Promise.all(functionCalls.map(async (call: any) => {
            if (call.name === 'checkDomains') {
-              const { names } = call.args as { names: string[] };
-              const availabilityResults = await checkMultipleDomains(names, selectedTlds);
+              const { names, tlds } = call.args as { names: string[]; tlds?: string[] };
+              const tldsToCheck = Array.isArray(tlds) && tlds.length > 0 ? tlds : selectedTlds;
+              const availabilityResults = await checkMultipleDomains(names, tldsToCheck);
               
               return {
                  id: call.id,
@@ -90,7 +116,7 @@ function App() {
 
         // Construct the message with tool calls to send back to history
         // We create a combined message that represents the model's call AND the tool's response
-        // Our backend mapper will split this into the correct sequence for Gemini
+        // Our backend will split this into the correct sequence for tool-calling.
         const toolResponseMessage: Message = {
             id: (Date.now() + 1).toString(),
             role: Role.MODEL,
@@ -232,10 +258,10 @@ function App() {
              <p className="text-xs text-slate-400">
                Checking: {selectedTlds.slice(0, 3).join(', ')}{selectedTlds.length > 3 ? ` +${selectedTlds.length - 3} more` : ''}
              </p>
-             {!process.env.API_KEY && (
+             {isBackendConfigured === false && (
                <div className="flex items-center text-xs text-red-500 gap-1 font-medium">
                   <AlertCircle size={12} />
-                  <span>API Key Missing</span>
+                  <span>Backend not configured</span>
                </div>
              )}
           </div>

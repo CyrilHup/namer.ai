@@ -37,6 +37,7 @@ export const AVAILABLE_TLDS = [
   '.com',
   '.io',
   '.ai',
+  '.ia',
   '.co',
   '.net',
   '.org',
@@ -47,5 +48,11 @@ export const AVAILABLE_TLDS = [
   '.xyz',
   '.fr',
   '.de',
-  '.uk'
+  '.uk',
+  // Expanded set used for "check again" / "more" retries
+  '.info',
+  '.site',
+  '.tech',
+  '.cloud',
+  '.studio'
 ];
